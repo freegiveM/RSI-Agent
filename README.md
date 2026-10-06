@@ -16,7 +16,7 @@ PR Webhook
 
 系统不把细粒度漏洞类型作为第一层路由，而是使用有限风险面（输入与敏感 Sink、权限边界、解析序列化、状态并发、依赖配置、业务回归）。未匹配场景进入通用检查或人工复核，不默认视为安全。
 
-AgentScope 负责通用 Agent 执行、工具调用和基础观测；项目自身负责 PR 快照幂等、风险路由、证据契约、记忆策略、反馈和策略版本。当前版本的策略演化使用离线 Replay、Validation、Holdout 和 Shadow，Canary 暂不实现。
+AgentScope 负责通用 Agent 执行、工具调用和基础观测；项目自身负责 PR 快照幂等、风险路由、证据契约、反馈和策略版本。策略更新在离线评测后再由用户显式激活，避免未经验证的策略直接影响审查结果。
 
 ## 项目结构
 
@@ -26,8 +26,10 @@ rsi_agent/
   store.py       # SQLite 事件、任务和状态迁移
   routing.py     # 风险面提取与专家路由
   service.py     # 审查任务编排边界
-tests/           # 单元测试和后续集成测试
-docs/            # 分阶段设计、验收和面试说明
+  agents.py       # AgentRunner、工具权限和证据契约
+  worker.py       # 带重试与超时边界的任务执行器
+tests/             # 自动化测试
+docs/              # 设计说明和使用文档
 ```
 
 ## Quickstart
@@ -39,12 +41,4 @@ python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
-当前阶段不需要模型 API Key 或 GitHub 公网 Webhook 即可运行测试。AgentScope 接入、真实 GitHub 事件和模型调用将在后续阶段增加，并保持核心服务可用。
-
-## 阶段计划
-
-1. **基础闭环**：PR 快照、幂等任务、SQLite 状态机、风险面初筛和测试。
-2. **Agent 与验证**：AgentScope 适配层、Security/Correctness、Verifier、Finding 证据契约和异步 Worker。
-3. **反馈与策略演化**：Review 反馈、记忆引擎、GEPA-inspired PolicyPatch、Replay/Validation/Holdout/Shadow。
-
-每个阶段完成后都会更新文档、运行测试、记录验收结果并提交 Git 版本。
+当前测试不需要模型 API Key 或 GitHub 公网 Webhook。模型和外部事件接入时，可以复用同一组任务、证据和状态接口。

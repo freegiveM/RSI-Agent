@@ -32,6 +32,8 @@ class TaskStore:
                 base_sha TEXT NOT NULL,
                 head_sha TEXT NOT NULL,
                 policy_version TEXT NOT NULL,
+                changed_files_json TEXT NOT NULL,
+                diff TEXT NOT NULL,
                 status TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 UNIQUE(repo_id, pr_number, head_sha, policy_version)
@@ -66,9 +68,10 @@ class TaskStore:
         if row:
             return self._job_from_row(row)
         self.connection.execute(
-            "INSERT INTO review_jobs VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO review_jobs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (job.job_id, job.snapshot.repo_id, job.snapshot.pr_number, job.snapshot.base_sha,
-             job.snapshot.head_sha, job.policy_version, job.status.value, job.created_at),
+             job.snapshot.head_sha, job.policy_version, json.dumps(job.snapshot.changed_files),
+             job.snapshot.diff, job.status.value, job.created_at),
         )
         self.connection.execute(
             "INSERT INTO review_events(job_id, from_status, to_status, created_at) VALUES (?, ?, ?, ?)",
@@ -98,5 +101,8 @@ class TaskStore:
 
     @staticmethod
     def _job_from_row(row: sqlite3.Row) -> ReviewJob:
-        snapshot = PRSnapshot(row["repo_id"], row["pr_number"], row["base_sha"], row["head_sha"], ())
+        snapshot = PRSnapshot(
+            row["repo_id"], row["pr_number"], row["base_sha"], row["head_sha"],
+            tuple(json.loads(row["changed_files_json"])), row["diff"],
+        )
         return ReviewJob(row["job_id"], snapshot, row["policy_version"], JobStatus(row["status"]), row["created_at"])
