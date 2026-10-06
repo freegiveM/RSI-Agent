@@ -1,5 +1,6 @@
 __pycache__/
 .pytest_cache/
+pr_diff_100.jsonl
 *.py[cod]
 .venv/
 .env
