@@ -12,3 +12,9 @@ def test_agentscope_runner_requires_role():
     runner = AgentScopeRunner({"security": lambda prompt: {"findings": []}})
     with pytest.raises(ValueError):
         runner.run("verifier", {}, ())
+
+
+def test_deepseek_factory_requires_key():
+    from types import SimpleNamespace
+    with pytest.raises(ValueError):
+        AgentScopeRunner.from_deepseek_env(SimpleNamespace(deepseek_api_key=""))

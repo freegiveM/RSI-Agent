@@ -28,6 +28,11 @@ class AppConfig:
     github_api_url: str = "https://api.github.com"
     redis_url: str = ""
     redis_protocol: int = 2
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com/v1"
+    deepseek_model: str = "deepseek-v4-pro"
+    deepseek_max_tokens: int = 4096
+    deepseek_temperature: float = 0.0
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -42,6 +47,10 @@ class AppConfig:
             os.getenv("APP_HOST", "127.0.0.1"), int(os.getenv("APP_PORT", "8787")),
             os.getenv("DATABASE_PATH", ".rsi/reviews.db"), os.getenv("GITHUB_TOKEN", ""),
             os.getenv("GITHUB_WEBHOOK_SECRET", ""), os.getenv("GITHUB_API_URL", "https://api.github.com"), redis_url,
+            2, os.getenv("DEEPSEEK_API_KEY", os.getenv("OPENAI_API_KEY", "")),
+            os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
+            os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro"), int(os.getenv("DEEPSEEK_MAX_TOKENS", "4096")),
+            float(os.getenv("DEEPSEEK_TEMPERATURE", "0")),
         )
 
     def validate_api(self) -> None:

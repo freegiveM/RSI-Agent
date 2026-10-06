@@ -8,6 +8,7 @@ from .queue import RedisStreamQueue
 from .service import ReviewService
 from .worker import ReviewWorker
 from .store import TaskStore
+from .agentscope_runner import AgentScopeRunner
 
 
 def main() -> None:
@@ -17,7 +18,8 @@ def main() -> None:
     config = AppConfig.from_env()
     queue = RedisStreamQueue(config.redis_url, consumer=args.consumer)
     service = ReviewService(TaskStore(config.database_path))
-    worker = ReviewWorker(service, DeterministicAgentRunner(), ToolRegistry())
+    runner = AgentScopeRunner.from_deepseek_env(config) if config.deepseek_api_key else DeterministicAgentRunner()
+    worker = ReviewWorker(service, runner, ToolRegistry())
     print(f"Worker listening on Redis stream as {args.consumer}")
     while True:
         for message in queue.consume():

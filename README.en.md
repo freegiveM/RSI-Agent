@@ -97,6 +97,14 @@ python -m rsi_agent.run_worker
 
 The GitHub Webhook must include `Pull requests`. Select `Issue comments` as well when comment-based feedback is enabled. The webhook only validates and enqueues; the worker performs the review.
 
+Install the real AgentScope runner with:
+
+```powershell
+python -m pip install -e ".[agent]"
+```
+
+When `DEEPSEEK_API_KEY` is set, `run_worker` creates Security, Correctness and Verifier agents through AgentScope 2.0.9. Set `DEEPSEEK_MODEL` to the model ID available in your DeepSeek account.
+
 ### 3. Start the local feedback service
 
 ```powershell

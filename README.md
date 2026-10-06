@@ -98,6 +98,14 @@ python -m rsi_agent.run_worker
 
 GitHub Webhook 需要至少选择 `Pull requests`；启用评论反馈时还要选择 `Issue comments`。Webhook 入口只负责校验并入队，Worker 才执行审查。
 
+安装真实 AgentScope Runner：
+
+```powershell
+python -m pip install -e ".[agent]"
+```
+
+配置 `DEEPSEEK_API_KEY` 后，`run_worker` 会使用 AgentScope 2.0.9 创建 Security、Correctness 和 Verifier Agent。`DEEPSEEK_MODEL` 必须填写 DeepSeek 控制台实际提供的模型 ID。
+
 策略候选只会在离线评测通过后由用户显式激活。仓库级记忆和 Skill 使用 `.rsi/memory` 与 `.rsi/skills` 目录；历史反馈和评测结果保存在 SQLite。项目不要求向量数据库，历史记录使用 FTS5/BM25，仓库文件使用可审计的文本检索。
 
 ### 3. 启动本地反馈服务
