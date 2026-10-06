@@ -7,6 +7,7 @@ from .api import create_app
 from .github_api import GitHubApiReader
 from .service import ReviewService
 from .config import AppConfig
+from .queue import RedisStreamQueue
 
 
 def main() -> None:
@@ -16,7 +17,7 @@ def main() -> None:
     args = parser.parse_args()
     config = AppConfig.from_env()
     config.validate_api()
-    app = create_app(ReviewService(), GitHubApiReader(config.github_token, config.github_api_url), webhook_secret=config.github_webhook_secret)
+    app = create_app(ReviewService(), GitHubApiReader(config.github_token, config.github_api_url), queue=RedisStreamQueue(config.redis_url), webhook_secret=config.github_webhook_secret)
     uvicorn.run(app, host=args.host or config.host, port=args.port or config.port)
 
 

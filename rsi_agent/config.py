@@ -27,6 +27,7 @@ class AppConfig:
     github_webhook_secret: str = ""
     github_api_url: str = "https://api.github.com"
     redis_url: str = ""
+    redis_protocol: int = 2
 
     @classmethod
     def from_env(cls) -> "AppConfig":

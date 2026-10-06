@@ -35,6 +35,10 @@ rsi_agent/
   policy.py       # Validation/Holdout policy gate
   replay.py       # Offline Replay and Shadow evaluation
   http_api.py     # Local feedback HTTP API
+  queue.py        # In-memory and Redis Stream adapters
+  run_worker.py   # Redis Stream worker entry point
+  github_comments.py # GitHub comment formatting
+  agentscope_runner.py # AgentScope execution boundary
   api.py           # FastAPI webhook ingress
   github_api.py   # Read-only GitHub PR client
 tests/            # Automated tests
@@ -84,6 +88,14 @@ To skip the Redis check temporarily:
 ```powershell
 .\scripts\start-local.ps1 -SkipRedisCheck
 ```
+
+Run the asynchronous worker with Redis Streams:
+
+```powershell
+python -m rsi_agent.run_worker
+```
+
+The GitHub Webhook must include `Pull requests`. Select `Issue comments` as well when comment-based feedback is enabled. The webhook only validates and enqueues; the worker performs the review.
 
 ### 3. Start the local feedback service
 

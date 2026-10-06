@@ -35,6 +35,10 @@ rsi_agent/
   policy.py       # Validation/Holdout 策略门禁
   replay.py       # 可注入检测器的离线 Replay/Shadow
   http_api.py     # 本地反馈 HTTP 接口
+  queue.py        # 内存队列与 Redis Stream 适配器
+  run_worker.py   # Redis Stream Worker 入口
+  github_comments.py # GitHub 评论格式化
+  agentscope_runner.py # AgentScope 执行边界
   api.py          # FastAPI Webhook 接入
   github_api.py   # GitHub PR 只读客户端
 tests/             # 自动化测试
@@ -85,6 +89,14 @@ python -m rsi_agent.run_api --port 8787
 ```powershell
 .\scripts\start-local.ps1 -SkipRedisCheck
 ```
+
+真实异步 Worker 使用 Redis Stream：
+
+```powershell
+python -m rsi_agent.run_worker
+```
+
+GitHub Webhook 需要至少选择 `Pull requests`；启用评论反馈时还要选择 `Issue comments`。Webhook 入口只负责校验并入队，Worker 才执行审查。
 
 策略候选只会在离线评测通过后由用户显式激活。仓库级记忆和 Skill 使用 `.rsi/memory` 与 `.rsi/skills` 目录；历史反馈和评测结果保存在 SQLite。项目不要求向量数据库，历史记录使用 FTS5/BM25，仓库文件使用可审计的文本检索。
 
