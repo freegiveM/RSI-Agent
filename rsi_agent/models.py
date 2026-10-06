@@ -82,3 +82,41 @@ class ReviewResult:
     risk_features: RiskFeatureSet
     route: tuple[str, ...]
     trace: tuple[dict[str, Any], ...]
+
+
+class FeedbackKind(StrEnum):
+    ACCEPTED = "accepted"
+    FALSE_POSITIVE = "false_positive"
+    MISSED_RISK = "missed_risk"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+
+
+@dataclass(frozen=True)
+class FeedbackEvent:
+    event_id: str
+    repo_id: str
+    pr_number: int
+    head_sha: str
+    kind: FeedbackKind
+    finding_id: str | None = None
+    note: str = ""
+    reporter: str = "local"
+    created_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
+class PolicyCandidate:
+    policy_id: str
+    parent_policy_id: str
+    kind: str
+    patch: str
+    source_feedback_ids: tuple[str, ...]
+    status: str = "CANDIDATE"
+
+
+@dataclass(frozen=True)
+class EvaluationResult:
+    policy_id: str
+    split: str
+    metrics: dict[str, float]
+    decision: str
