@@ -5,6 +5,12 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 
 from .agents import AgentRunner, ToolRegistry, run_detector, verify_findings
 from .models import JobStatus, ReviewResult
+from typing import Protocol
+
+
+class CommentWriter(Protocol):
+    def create_issue_comment(self, repository: str, number: int, body: str) -> dict: ...
+    def finding_body(self, finding) -> str: ...
 from .service import ReviewService
 
 
@@ -17,11 +23,12 @@ class WorkerConfig:
 class ReviewWorker:
     """Synchronous core of an async worker; queue adapters can call process()."""
 
-    def __init__(self, service: ReviewService, runner: AgentRunner, tools: ToolRegistry, config: WorkerConfig | None = None) -> None:
+    def __init__(self, service: ReviewService, runner: AgentRunner, tools: ToolRegistry, config: WorkerConfig | None = None, comment_writer: CommentWriter | None = None) -> None:
         self.service = service
         self.runner = runner
         self.tools = tools
         self.config = config or WorkerConfig()
+        self.comment_writer = comment_writer
 
     def process(self, job_id: str) -> ReviewResult:
         try:
@@ -39,6 +46,13 @@ class ReviewWorker:
             verified = self._run_with_retry(
                 verify_findings, self.runner, tuple(findings), job.snapshot, self.tools, job_id,
             )
+            if self.comment_writer:
+                for finding in verified:
+                    if finding.verification_status == "verified":
+                        self.comment_writer.create_issue_comment(
+                            job.snapshot.repo_id, job.snapshot.pr_number,
+                            self.comment_writer.finding_body(finding),
+                        )
             self.service.store.transition(job_id, JobStatus.VERIFYING, JobStatus.COMPLETED)
             return ReviewResult(self.service.store.get_job(job_id), verified, result.risk_features, result.route, result.trace)
         except Exception:

@@ -9,6 +9,7 @@ from .service import ReviewService
 from .worker import ReviewWorker
 from .store import TaskStore
 from .agentscope_runner import AgentScopeRunner
+from .github_comments import GitHubCommentWriter
 
 
 def main() -> None:
@@ -20,7 +21,7 @@ def main() -> None:
     queue = RedisStreamQueue(config.redis_url, stream=config.redis_stream, group=config.redis_consumer_group, consumer=args.consumer)
     service = ReviewService(TaskStore(config.database_path))
     runner = AgentScopeRunner.from_deepseek_env(config) if config.deepseek_api_key else DeterministicAgentRunner()
-    worker = ReviewWorker(service, runner, ToolRegistry())
+    worker = ReviewWorker(service, runner, ToolRegistry(), comment_writer=GitHubCommentWriter(config.github_token, config.github_api_url))
     print(f"Worker listening on Redis stream as {args.consumer}")
     while True:
         for message in queue.consume():
