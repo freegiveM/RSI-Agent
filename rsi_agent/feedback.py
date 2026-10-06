@@ -80,3 +80,10 @@ class FeedbackStore:
     def evaluations(self, policy_id: str) -> tuple[EvaluationResult, ...]:
         rows = self.connection.execute("SELECT * FROM policy_evaluations WHERE policy_id=? ORDER BY split", (policy_id,)).fetchall()
         return tuple(EvaluationResult(row["policy_id"], row["split"], json.loads(row["metrics_json"]), row["decision"]) for row in rows)
+
+    def activate(self, policy_id: str) -> None:
+        results = self.evaluations(policy_id)
+        if not results or {result.split for result in results} != {"validation", "holdout"} or any(result.decision != "PASSED" for result in results):
+            raise ValueError("policy must pass validation and holdout before activation")
+        self.connection.execute("UPDATE policy_candidates SET status='ACTIVE' WHERE policy_id=?", (policy_id,))
+        self.connection.commit()

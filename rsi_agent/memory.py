@@ -111,3 +111,15 @@ def load_skills(workspace: str | Path) -> tuple[Skill, ...]:
         triggers = tuple(sorted(set(re.findall(r"(?:trigger|scope)\s*:\s*([^\n]+)", content, re.I))))
         skills.append(Skill(path.parent.name, str(path), content, triggers))
     return tuple(skills)
+
+
+def select_skills(skills: tuple[Skill, ...], query: str, limit: int = 2) -> tuple[Skill, ...]:
+    terms = set(re.findall(r"[\w.-]+", query.lower()))
+    ranked = []
+    for skill in skills:
+        haystack = f"{skill.name} {' '.join(skill.triggers)} {skill.content}".lower()
+        score = sum(term in haystack for term in terms)
+        if score:
+            ranked.append((score, skill))
+    ranked.sort(key=lambda item: (-item[0], item[1].name))
+    return tuple(skill for _, skill in ranked[:limit])

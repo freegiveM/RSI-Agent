@@ -28,8 +28,12 @@ rsi_agent/
   service.py     # 审查任务编排边界
   agents.py       # AgentRunner、工具权限和证据契约
   worker.py       # 带重试与超时边界的任务执行器
+  memory.py       # SQLite FTS5 历史记忆和仓库 Skill 加载
+  feedback.py     # 反馈事件与策略候选持久化
+  policy.py       # Validation/Holdout 策略门禁
+  replay.py       # 可注入检测器的离线 Replay/Shadow
 tests/             # 自动化测试
-docs/              # 设计说明和使用文档
+docs/              # AgentScope 集成说明
 ```
 
 ## Quickstart
@@ -42,3 +46,5 @@ python -m pytest
 ```
 
 当前测试不需要模型 API Key 或 GitHub 公网 Webhook。模型和外部事件接入时，可以复用同一组任务、证据和状态接口。
+
+策略候选只会在离线评测通过后由用户显式激活。仓库级记忆和 Skill 使用 `.rsi/memory` 与 `.rsi/skills` 目录；历史反馈和评测结果保存在 SQLite。项目不要求向量数据库，历史记录使用 FTS5/BM25，仓库文件使用可审计的文本检索。

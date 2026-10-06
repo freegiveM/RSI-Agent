@@ -17,7 +17,8 @@ class PolicyGate:
         for result in (validation, holdout):
             if result.metrics.get("recall", 0.0) < self.min_recall:
                 return "REJECTED"
-            if result.metrics.get("false_positive_rate", 1.0) > self.max_false_positive_rate:
+            false_positive_rate = result.metrics.get("false_positive_rate", result.metrics.get("false_positive_case_rate", 1.0))
+            if false_positive_rate > self.max_false_positive_rate:
                 return "REJECTED"
             if result.metrics.get("cost_delta", 0.0) > self.max_cost_delta:
                 return "REJECTED"

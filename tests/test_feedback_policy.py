@@ -20,13 +20,28 @@ def test_feedback_is_idempotent_and_missed_risk_is_traceable():
 
 def test_policy_gate_requires_both_splits_and_blocks_regression():
     gate = PolicyGate(min_recall=0.8, max_false_positive_rate=0.2)
-    validation = EvaluationResult("p-2", "validation", {"recall": 0.9, "false_positive_rate": 0.1, "cost_delta": 0.1}, "pending")
-    holdout = EvaluationResult("p-2", "holdout", {"recall": 0.7, "false_positive_rate": 0.1, "cost_delta": 0.1}, "pending")
+    validation = EvaluationResult("p-2", "validation", {"recall": 0.9, "false_positive_case_rate": 0.1, "cost_delta": 0.1}, "pending")
+    holdout = EvaluationResult("p-2", "holdout", {"recall": 0.7, "false_positive_case_rate": 0.1, "cost_delta": 0.1}, "pending")
     assert gate.decide(validation, holdout) == "REJECTED"
 
 
 def test_policy_gate_passes_only_valid_pair():
     gate = PolicyGate()
-    validation = EvaluationResult("p-2", "validation", {"recall": 0.9, "false_positive_rate": 0.1, "cost_delta": 0.1}, "pending")
-    holdout = EvaluationResult("p-2", "holdout", {"recall": 0.85, "false_positive_rate": 0.15, "cost_delta": 0.2}, "pending")
+    validation = EvaluationResult("p-2", "validation", {"recall": 0.9, "false_positive_case_rate": 0.1, "cost_delta": 0.1}, "pending")
+    holdout = EvaluationResult("p-2", "holdout", {"recall": 0.85, "false_positive_case_rate": 0.15, "cost_delta": 0.2}, "pending")
     assert gate.decide(validation, holdout) == "PASSED"
+
+
+def test_candidate_activation_requires_both_passed_evaluations():
+    store = FeedbackStore()
+    candidate = propose_skill_patch("p-2", "p-1", (event(),))
+    store.add_candidate(candidate)
+    try:
+        store.activate("p-2")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unmeasured policy was activated")
+    store.evaluate(EvaluationResult("p-2", "validation", {"recall": 1.0}, "PASSED"))
+    store.evaluate(EvaluationResult("p-2", "holdout", {"recall": 1.0}, "PASSED"))
+    store.activate("p-2")
