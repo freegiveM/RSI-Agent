@@ -32,6 +32,7 @@ rsi_agent/
   feedback.py     # 反馈事件与策略候选持久化
   policy.py       # Validation/Holdout 策略门禁
   replay.py       # 可注入检测器的离线 Replay/Shadow
+  http_api.py     # 本地反馈 HTTP 接口
 tests/             # 自动化测试
 docs/              # AgentScope 集成说明
 ```
@@ -48,3 +49,11 @@ python -m pytest
 当前测试不需要模型 API Key 或 GitHub 公网 Webhook。模型和外部事件接入时，可以复用同一组任务、证据和状态接口。
 
 策略候选只会在离线评测通过后由用户显式激活。仓库级记忆和 Skill 使用 `.rsi/memory` 与 `.rsi/skills` 目录；历史反馈和评测结果保存在 SQLite。项目不要求向量数据库，历史记录使用 FTS5/BM25，仓库文件使用可审计的文本检索。
+
+本地反馈接口：
+
+```powershell
+python -c "from rsi_agent.http_api import serve; serve(__import__('rsi_agent.service', fromlist=['ReviewService']).ReviewService()).serve_forever()"
+```
+
+向 `POST /feedback` 提交包含 `event_id`、`repo_id`、`pr_number`、`head_sha` 和 `kind` 的 JSON。重复 `event_id` 会被幂等忽略；漏报反馈还需要提供说明文本，才能进入重新审查链路。

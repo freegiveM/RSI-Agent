@@ -12,7 +12,7 @@ class TaskStore:
     """Small durable store for idempotent review jobs and state transitions."""
 
     def __init__(self, path: str | Path = ":memory:") -> None:
-        self.connection = sqlite3.connect(path)
+        self.connection = sqlite3.connect(path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
         self._create_schema()
 
@@ -98,6 +98,13 @@ class TaskStore:
         if not row:
             raise KeyError(job_id)
         return self._job_from_row(row)
+
+    def find_job(self, snapshot: PRSnapshot, policy_version: str) -> ReviewJob | None:
+        row = self.connection.execute(
+            "SELECT * FROM review_jobs WHERE repo_id=? AND pr_number=? AND head_sha=? AND policy_version=?",
+            (snapshot.repo_id, snapshot.pr_number, snapshot.head_sha, policy_version),
+        ).fetchone()
+        return self._job_from_row(row) if row else None
 
     @staticmethod
     def _job_from_row(row: sqlite3.Row) -> ReviewJob:

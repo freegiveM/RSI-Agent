@@ -12,7 +12,7 @@ class FeedbackStore:
     """Durable feedback and policy registry with event-level idempotency."""
 
     def __init__(self, path: str | Path = ":memory:") -> None:
-        self.connection = sqlite3.connect(path)
+        self.connection = sqlite3.connect(path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
         self.connection.executescript(
             """
