@@ -51,6 +51,14 @@ py -3.11 -m venv .venv
 python -m pip install -e ".[dev]"
 ```
 
+Copy the configuration template and fill in local credentials:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+`.env` is ignored by Git. Never commit real tokens, passwords or webhook secrets.
+
 ### 2. Run tests
 
 ```powershell
@@ -63,6 +71,18 @@ For a real GitHub integration, set `GITHUB_TOKEN` and `GITHUB_WEBHOOK_SECRET`, t
 
 ```powershell
 python -m rsi_agent.run_api --port 8787
+```
+
+The one-command local script checks configuration, installs server dependencies and verifies Redis:
+
+```powershell
+.\scripts\start-local.ps1
+```
+
+To skip the Redis check temporarily:
+
+```powershell
+.\scripts\start-local.ps1 -SkipRedisCheck
 ```
 
 ### 3. Start the local feedback service

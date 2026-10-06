@@ -52,6 +52,14 @@ python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
+复制配置模板并填写本地凭据：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+`.env` 已被 Git 忽略，不要提交真实 Token、密码或 Webhook Secret。
+
 ### 2. 运行测试
 
 ```powershell
@@ -64,6 +72,18 @@ python -m pytest -q
 
 ```powershell
 python -m rsi_agent.run_api --port 8787
+```
+
+也可以使用一键脚本。脚本会检查配置、安装服务依赖并验证 Redis 连接：
+
+```powershell
+.\scripts\start-local.ps1
+```
+
+如果暂时不使用 Redis：
+
+```powershell
+.\scripts\start-local.ps1 -SkipRedisCheck
 ```
 
 策略候选只会在离线评测通过后由用户显式激活。仓库级记忆和 Skill 使用 `.rsi/memory` 与 `.rsi/skills` 目录；历史反馈和评测结果保存在 SQLite。项目不要求向量数据库，历史记录使用 FTS5/BM25，仓库文件使用可审计的文本检索。

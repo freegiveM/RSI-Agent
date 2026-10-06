@@ -4,9 +4,11 @@ pr_diff_100.jsonl
 *.py[cod]
 .venv/
 .env
+!.env.example
 *.db
 *.egg-info/
 docs/implementation-plan.md
 docs/memory-and-skill-design.md
 docs/dataset-assessment.md
 docs/feedback-and-policy-design.md
+docs/real-integration-plan.md
