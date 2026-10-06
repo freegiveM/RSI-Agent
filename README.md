@@ -1,5 +1,7 @@
 # RSI-Agent
 
+[English](README.en.md) | 中文
+
 面向研发 Pull Request 的证据驱动风险审查 Agent。项目以 AgentScope 作为 Agent 执行底座，在其上实现 PR 快照、风险面路由、专家分析、独立验证、证据门禁和可恢复的后端任务闭环。
 
 ## 核心思想
@@ -37,7 +39,9 @@ tests/             # 自动化测试
 docs/              # AgentScope 集成说明
 ```
 
-## Quickstart
+## 快速开始
+
+### 1. 安装
 
 ```powershell
 py -3.11 -m venv .venv
@@ -46,14 +50,39 @@ python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
-当前测试不需要模型 API Key 或 GitHub 公网 Webhook。模型和外部事件接入时，可以复用同一组任务、证据和状态接口。
+### 2. 运行测试
+
+```powershell
+python -m pytest -q
+```
+
+当前测试不需要模型 API Key 或 GitHub 公网 Webhook。
 
 策略候选只会在离线评测通过后由用户显式激活。仓库级记忆和 Skill 使用 `.rsi/memory` 与 `.rsi/skills` 目录；历史反馈和评测结果保存在 SQLite。项目不要求向量数据库，历史记录使用 FTS5/BM25，仓库文件使用可审计的文本检索。
 
-本地反馈接口：
+### 3. 启动本地反馈服务
 
 ```powershell
-python -c "from rsi_agent.http_api import serve; serve(__import__('rsi_agent.service', fromlist=['ReviewService']).ReviewService()).serve_forever()"
+python -m rsi_agent.run_feedback_server --port 8787
 ```
 
-向 `POST /feedback` 提交包含 `event_id`、`repo_id`、`pr_number`、`head_sha` 和 `kind` 的 JSON。重复 `event_id` 会被幂等忽略；漏报反馈还需要提供说明文本，才能进入重新审查链路。
+### 4. 提交反馈
+
+向 `POST /feedback` 提交 JSON。`kind` 支持 `accepted`、`false_positive`、`missed_risk` 和 `insufficient_evidence`。
+
+```powershell
+$payload = @{
+  event_id = "feedback-1"
+  repo_id = "org/repo"
+  pr_number = 1
+  head_sha = "<commit-sha>"
+  kind = "accepted"
+  note = "reviewed by maintainer"
+  reporter = "local"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri http://127.0.0.1:8787/feedback `
+  -Method Post -ContentType "application/json" -Body $payload
+```
+
+重复的 `event_id` 会被幂等忽略。`missed_risk` 反馈必须包含说明文本，才能进入重新审查链路。
