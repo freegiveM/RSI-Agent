@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request
 
-from .github import GitHubReader, WebhookEvent, verify_signature
+from .github import GitHubReader, verify_signature
 from .queue import ReviewQueue
 from .service import ReviewService
 
@@ -31,10 +31,13 @@ def create_app(service: ReviewService, reader: GitHubReader, queue: ReviewQueue 
             return {"accepted": False, "reason": "duplicate_delivery"}
         try:
             payload = json.loads(body)
+            if x_github_event == "ping":
+                return {"accepted": True, "ignored": True, "event": "ping"}
             action = payload.get("action")
-            pr = payload["pull_request"]
             if x_github_event != "pull_request" or action not in {"opened", "reopened", "synchronize", "ready_for_review"}:
                 return {"accepted": True, "ignored": True}
+            if "pull_request" not in payload or "repository" not in payload:
+                raise ValueError("pull_request and repository are required")
             repository = payload["repository"]["full_name"]
             number = int(payload["number"])
             snapshot = reader.pull_snapshot(repository, number)
