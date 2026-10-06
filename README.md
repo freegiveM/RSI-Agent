@@ -47,7 +47,14 @@ docs/              # AgentScope 集成说明
 
 ## 快速开始
 
-### 1. 安装
+### 1. 前置条件
+
+- Python 3.11+
+- Docker Desktop
+- GitHub Token（接入 GitHub 时需要）
+- DeepSeek API Key（运行真实 Agent 时需要）
+
+### 2. 安装
 
 ```powershell
 py -3.11 -m venv .venv
@@ -64,7 +71,33 @@ Copy-Item .env.example .env
 
 `.env` 已被 Git 忽略，不要提交真实 Token、密码或 Webhook Secret。
 
-### 2. 运行测试
+默认配置使用本机 Docker Redis：
+
+```dotenv
+DEPLOYMENT_MODE=local
+REDIS_URL=redis://127.0.0.1:6379/0
+```
+
+### 3. 启动本地依赖和服务
+
+```powershell
+docker compose up -d redis
+python -m rsi_agent.run_api --port 8787
+```
+
+另开终端启动 Worker：
+
+```powershell
+python -m rsi_agent.run_worker
+```
+
+或使用一键脚本：
+
+```powershell
+.\scripts\start-local.ps1 -StartWorker
+```
+
+### 4. 运行测试
 
 ```powershell
 python -m pytest -q
@@ -108,13 +141,11 @@ python -m pip install -e ".[agent]"
 
 策略候选只会在离线评测通过后由用户显式激活。仓库级记忆和 Skill 使用 `.rsi/memory` 与 `.rsi/skills` 目录；历史反馈和评测结果保存在 SQLite。项目不要求向量数据库，历史记录使用 FTS5/BM25，仓库文件使用可审计的文本检索。
 
-### 3. 启动本地反馈服务
+### 5. 配置 GitHub Webhook
 
-```powershell
-python -m rsi_agent.run_feedback_server --port 8787
-```
+Webhook 至少选择 `Pull requests`；启用评论反馈时再选择 `Issue comments`。本地联调使用 Cloudflare Tunnel 暴露 `/webhooks/github`。
 
-### 4. 提交反馈
+### 6. 提交反馈
 
 向 `POST /feedback` 提交 JSON。`kind` 支持 `accepted`、`false_positive`、`missed_risk` 和 `insufficient_evidence`。
 
@@ -134,3 +165,12 @@ Invoke-RestMethod -Uri http://127.0.0.1:8787/feedback `
 ```
 
 重复的 `event_id` 会被幂等忽略。`missed_risk` 反馈必须包含说明文本，才能进入重新审查链路。
+
+### 远程 Redis（可选）
+
+```dotenv
+DEPLOYMENT_MODE=remote
+REDIS_URL=redis://:password@redis.example.com:6379/0
+```
+
+远程 Redis 需要自行配置认证、TLS 或私网访问。SSH 隧道只是个人开发环境的可选方式。

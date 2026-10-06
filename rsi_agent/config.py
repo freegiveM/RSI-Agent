@@ -20,6 +20,7 @@ def load_env_file(path: str | Path = ".env") -> None:
 
 @dataclass(frozen=True)
 class AppConfig:
+    deployment_mode: str = "local"
     host: str = "127.0.0.1"
     port: int = 8787
     database_path: str = ".rsi/reviews.db"
@@ -28,6 +29,8 @@ class AppConfig:
     github_api_url: str = "https://api.github.com"
     redis_url: str = ""
     redis_protocol: int = 2
+    redis_stream: str = "rsi:review-jobs"
+    redis_consumer_group: str = "rsi-workers"
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com/v1"
     deepseek_model: str = "deepseek-v4-pro"
@@ -37,17 +40,18 @@ class AppConfig:
     @classmethod
     def from_env(cls) -> "AppConfig":
         load_env_file()
-        redis_user = os.getenv("REDIS_USERNAME", "")
-        redis_password = os.getenv("REDIS_PASSWORD", "")
-        auth = ""
-        if redis_user or redis_password:
-            auth = f"{quote(redis_user)}:{quote(redis_password)}@"
-        redis_url = f"redis://{auth}{os.getenv('REDIS_HOST', '127.0.0.1')}:{os.getenv('REDIS_PORT', '6379')}/{os.getenv('REDIS_DB', '0')}"
+        redis_url = os.getenv("REDIS_URL", "")
+        if not redis_url:
+            redis_user = os.getenv("REDIS_USERNAME", "")
+            redis_password = os.getenv("REDIS_PASSWORD", "")
+            auth = f"{quote(redis_user)}:{quote(redis_password)}@" if redis_user or redis_password else ""
+            redis_url = f"redis://{auth}{os.getenv('REDIS_HOST', '127.0.0.1')}:{os.getenv('REDIS_PORT', '6379')}/{os.getenv('REDIS_DB', '0')}"
         return cls(
-            os.getenv("APP_HOST", "127.0.0.1"), int(os.getenv("APP_PORT", "8787")),
+            os.getenv("DEPLOYMENT_MODE", "local"), os.getenv("APP_HOST", "127.0.0.1"), int(os.getenv("APP_PORT", "8787")),
             os.getenv("DATABASE_PATH", ".rsi/reviews.db"), os.getenv("GITHUB_TOKEN", ""),
             os.getenv("GITHUB_WEBHOOK_SECRET", ""), os.getenv("GITHUB_API_URL", "https://api.github.com"), redis_url,
-            2, os.getenv("DEEPSEEK_API_KEY", os.getenv("OPENAI_API_KEY", "")),
+            2, os.getenv("REDIS_STREAM", "rsi:review-jobs"), os.getenv("REDIS_CONSUMER_GROUP", "rsi-workers"),
+            os.getenv("DEEPSEEK_API_KEY", os.getenv("OPENAI_API_KEY", "")),
             os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
             os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro"), int(os.getenv("DEEPSEEK_MAX_TOKENS", "4096")),
             float(os.getenv("DEEPSEEK_TEMPERATURE", "0")),
@@ -60,3 +64,9 @@ class AppConfig:
         }.items() if not value]
         if missing:
             raise ValueError("missing required configuration: " + ", ".join(missing))
+
+    def validate_mode(self) -> None:
+        if self.deployment_mode not in {"local", "remote"}:
+            raise ValueError("DEPLOYMENT_MODE must be local or remote")
+        if not self.redis_url:
+            raise ValueError("REDIS_URL must not be empty")

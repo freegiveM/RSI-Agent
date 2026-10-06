@@ -47,7 +47,14 @@ docs/             # AgentScope integration notes
 
 ## Quickstart
 
-### 1. Install
+### 1. Prerequisites
+
+- Python 3.11+
+- Docker Desktop
+- GitHub Token for GitHub integration
+- DeepSeek API key for the real agent runner
+
+### 2. Install
 
 ```powershell
 py -3.11 -m venv .venv
@@ -63,7 +70,33 @@ Copy-Item .env.example .env
 
 `.env` is ignored by Git. Never commit real tokens, passwords or webhook secrets.
 
-### 2. Run tests
+The default configuration uses a local Docker Redis:
+
+```dotenv
+DEPLOYMENT_MODE=local
+REDIS_URL=redis://127.0.0.1:6379/0
+```
+
+### 3. Start local dependencies and services
+
+```powershell
+docker compose up -d redis
+python -m rsi_agent.run_api --port 8787
+```
+
+In another terminal, start the worker:
+
+```powershell
+python -m rsi_agent.run_worker
+```
+
+Or use the one-command script:
+
+```powershell
+.\scripts\start-local.ps1 -StartWorker
+```
+
+### 4. Run tests
 
 ```powershell
 python -m pytest -q
@@ -105,13 +138,11 @@ python -m pip install -e ".[agent]"
 
 When `DEEPSEEK_API_KEY` is set, `run_worker` creates Security, Correctness and Verifier agents through AgentScope 2.0.9. Set `DEEPSEEK_MODEL` to the model ID available in your DeepSeek account.
 
-### 3. Start the local feedback service
+### 5. Configure the GitHub Webhook
 
-```powershell
-python -m rsi_agent.run_feedback_server --port 8787
-```
+Select `Pull requests`; select `Issue comments` when comment feedback is enabled. For local development, use Cloudflare Tunnel to expose `/webhooks/github`.
 
-### 4. Submit feedback
+### 6. Submit feedback
 
 Send JSON to `POST /feedback`. Supported kinds are `accepted`, `false_positive`, `missed_risk` and `insufficient_evidence`.
 
@@ -131,3 +162,12 @@ Invoke-RestMethod -Uri http://127.0.0.1:8787/feedback `
 ```
 
 Duplicate `event_id` values are ignored. `missed_risk` feedback requires a note before it can enter the re-review flow.
+
+### Optional remote Redis
+
+```dotenv
+DEPLOYMENT_MODE=remote
+REDIS_URL=redis://:password@redis.example.com:6379/0
+```
+
+Remote Redis must provide authentication, TLS or private networking. An SSH tunnel is only an optional personal development setup.
