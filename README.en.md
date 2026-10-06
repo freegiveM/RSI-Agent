@@ -35,6 +35,8 @@ rsi_agent/
   policy.py       # Validation/Holdout policy gate
   replay.py       # Offline Replay and Shadow evaluation
   http_api.py     # Local feedback HTTP API
+  api.py           # FastAPI webhook ingress
+  github_api.py   # Read-only GitHub PR client
 tests/            # Automated tests
 docs/             # AgentScope integration notes
 ```
@@ -56,6 +58,12 @@ python -m pytest -q
 ```
 
 The test suite runs without model credentials or a public GitHub Webhook.
+
+For a real GitHub integration, set `GITHUB_TOKEN` and `GITHUB_WEBHOOK_SECRET`, then run:
+
+```powershell
+python -m rsi_agent.run_api --port 8787
+```
 
 ### 3. Start the local feedback service
 
