@@ -72,10 +72,24 @@
     }
     function renderFileTree(job) {
       const files = job.diff?.files || job.changed_files.map(path => ({path, status:'unknown', parse_status:'not_reported', hunks:[], finding_ids:[]}));
-      const roots = {};
-      for (const file of files) { const parts = file.path.split('/'); let node = roots; for (const part of parts.slice(0,-1)) node = node[part] || (node[part] = {_children:{}}); (node._files || (node._files=[])).push({...file, name:parts.at(-1)}); }
-      function branch(node, prefix='') { return Object.entries(node).filter(([key])=>key !== '_files').sort().map(([name, child])=>`<details ${hasFinding(child) ? 'open' : ''}><summary>${esc(name)}/</summary>${branch(child,prefix+name+'/')}</details>`).join('') + (node._files||[]).sort((a,b)=>a.name.localeCompare(b.name)).map(file=>`<div class="diff-file"><code>${esc(file.name)}</code> <span class="muted">${esc(file.status)} · ${file.finding_ids.length} 个 Finding</span><button onclick="showDiff('${esc(file.path)}')">查看代码</button></div>`).join(''); }
-      function hasFinding(node) { return (node._files || []).some(file => file.finding_ids.length) || Object.entries(node).some(([key, child]) => key !== '_files' && hasFinding(child)); }
+      // Keep directory metadata separate from rendered entries. A previous
+      // implementation used an internal `_children` marker, which leaked
+      // into the tree as a clickable directory with no contents.
+      const makeNode = () => ({dirs: Object.create(null), files: []});
+      const roots = makeNode();
+      for (const file of files) {
+        const parts = String(file.path || '').split('/').filter(Boolean);
+        if (!parts.length) continue;
+        let node = roots;
+        for (const part of parts.slice(0, -1)) node = node.dirs[part] || (node.dirs[part] = makeNode());
+        node.files.push({...file, name: parts.at(-1)});
+      }
+      function branch(node) {
+        const dirs = Object.entries(node.dirs).sort(([a], [b]) => a.localeCompare(b));
+        const filesHtml = node.files.sort((a, b) => a.name.localeCompare(b.name)).map(file => `<div class="diff-file"><code>${esc(file.name)}</code> <span class="muted">${esc(file.status)} · ${file.finding_ids.length} 个 Finding</span><button onclick="showDiff('${esc(file.path)}')">查看代码</button></div>`).join('');
+        return dirs.map(([name, child]) => `<details ${hasFinding(child) ? 'open' : ''}><summary>${esc(name)}/</summary>${branch(child)}</details>`).join('') + filesHtml;
+      }
+      function hasFinding(node) { return node.files.some(file => file.finding_ids.length) || Object.values(node.dirs).some(hasFinding); }
       window.__diffFiles = files; return `<div class="tree"><div class="muted">目录默认收起，有 Finding 的文件可直接查看</div>${branch(roots)}</div>`;
     }
     function showDiff(path) { const file = (window.__diffFiles || []).find(item => item.path === path); const target = document.getElementById('diff-view'); if (!file || !file.hunks.length) { target.innerHTML = `<strong>${esc(path)}</strong><p class="muted">该文件没有可解析的 hunk（${esc(file?.parse_status || 'not_reported')}）。</p>`; return; } target.innerHTML = `<strong>${esc(path)}</strong>` + file.hunks.map(hunk => `<div class="diff-hunk"><header>${esc(hunk.header)}</header>${hunk.lines.map(line => `<div class="diff-line ${esc(line.kind)}"><span>${line.old ?? ''}</span><span>${line.new ?? ''}</span><span>${esc(line.text)}</span></div>`).join('')}</div>`).join(''); target.scrollIntoView({behavior:'smooth',block:'nearest'}); }
