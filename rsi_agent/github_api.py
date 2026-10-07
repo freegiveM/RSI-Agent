@@ -24,3 +24,7 @@ class GitHubApiReader:
             repository, number, pr["base"]["sha"], pr["head"]["sha"],
             tuple(item["filename"] for item in files), diff,
         )
+
+    def current_head_sha(self, repository: str, number: int) -> str:
+        pr = json.loads(self._get(f"/repos/{repository}/pulls/{number}").decode())
+        return str(pr["head"]["sha"])

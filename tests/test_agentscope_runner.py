@@ -41,3 +41,29 @@ def test_runner_uses_bounded_context_for_detector():
     assert "context_pack" in prompts[0]
     assert "src/query.py" in prompts[0]
     assert runner.traces[0]["context_level"] == "L1"
+
+
+def test_runner_keeps_provider_usage_separate_from_runner_trace():
+    class Usage:
+        prompt_tokens = 11
+        completion_tokens = 7
+        reasoning_tokens = 3
+
+    class Response:
+        content = '{"findings": []}'
+        usage = Usage()
+
+    runner = AgentScopeRunner({"security": lambda prompt: Response()})
+    result = runner.run("security", {"job_id": "job-usage"}, ())
+    assert result == {"findings": []}
+    assert runner.traces[-1]["phase"] == "runner"
+    assert runner.traces[-1]["output_tokens"] == 7
+    assert runner.traces[-1]["input_tokens"] == 11
+    assert runner.traces[-1]["reasoning_tokens"] == 3
+
+
+def test_runner_traces_unsupported_output_as_invalid_output():
+    runner = AgentScopeRunner({"security": lambda prompt: object()})
+    with pytest.raises(ValueError, match="unsupported output"):
+        runner.run("security", {"job_id": "job-invalid"}, ())
+    assert runner.traces[-1]["error_class"] == "INVALID_OUTPUT"

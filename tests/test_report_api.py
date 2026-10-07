@@ -34,6 +34,9 @@ def test_report_api_exposes_persisted_findings():
     assert response.json()["findings"][0]["verification_status"] == "verified"
     assert response.json()["outcome"] == "verified_risks"
     assert response.json()["budget"]["status"] == "not_reported"
+    assert response.json()["diff"]["files"][0]["path"] == "src/query.py"
+    assert response.json()["audit_events"]
+    assert response.json()["failure_guidance"]["retryable"] is False
     feedback = client.post(f"/api/jobs/{job.job_id}/feedback", json={"event_id": "ui-1", "kind": "accepted", "finding_id": "f-1"})
     assert feedback.status_code == 201
     assert feedback.json()["duplicate"] is False

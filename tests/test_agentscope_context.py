@@ -14,3 +14,5 @@ def test_context_middleware_records_model_call():
     assert result.usage.output_tokens == 3
     assert traces[0]["role"] == "security"
     assert traces[0]["output_tokens"] == 3
+    assert traces[0]["input_tokens"] is None
+    assert traces[0]["reasoning_tokens"] is None

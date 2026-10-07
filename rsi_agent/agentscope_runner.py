@@ -8,18 +8,19 @@ from typing import Any
 from .agents import AgentRunner
 from .context import ReviewContextBuilder, ContextBudget, estimate_tokens
 from .models import PRSnapshot, RiskFeatureSet
-from .agentscope_context import PRContextMiddleware
+from .agentscope_context import PRContextMiddleware, _usage_value
 
 
 class AgentScopeRunner(AgentRunner):
     """Provider boundary for AgentScope; model-specific construction stays isolated here."""
 
-    def __init__(self, agents: dict[str, Any] | None = None, context_builder: ReviewContextBuilder | None = None, trace_sink=None) -> None:
+    def __init__(self, agents: dict[str, Any] | None = None, context_builder: ReviewContextBuilder | None = None, trace_sink=None, middleware_traces: list[dict[str, Any]] | None = None) -> None:
         self.agents = agents or {}
         if not self.agents:
             raise ValueError("no AgentScope agents configured")
         self.context_builder = context_builder or ReviewContextBuilder()
         self.trace_sink = trace_sink
+        self.middleware_traces = middleware_traces if middleware_traces is not None else []
         self.traces: list[dict[str, Any]] = []
 
     def run(self, role: str, context: dict[str, Any], tools: tuple[str, ...]) -> dict[str, Any]:
@@ -39,10 +40,13 @@ class AgentScopeRunner(AgentRunner):
                 result = asyncio.run(agent.reply(Msg(name="review-orchestrator", role="user", content=[{"type": "text", "text": prompt}])))
         except Exception as exc:
             error_class = type(exc).__name__
+            self._flush_middleware_traces(context.get("job_id"))
             self._trace(role, context_level, context_tokens, started, None, error_class)
             raise
+        usage = getattr(result, "usage", None)
         if isinstance(result, dict):
-            self._trace(role, context_level, context_tokens, started, None, error_class)
+            self._flush_middleware_traces(context.get("job_id"))
+            self._trace(role, context_level, context_tokens, started, None, error_class, usage=usage)
             return result
         if hasattr(result, "content"):
             content = result.content
@@ -62,9 +66,17 @@ class AgentScopeRunner(AgentRunner):
             elif isinstance(content, str):
                 result = content
         if isinstance(result, str):
-            parsed = self._parse_json(result)
-            self._trace(role, context_level, context_tokens, started, None, error_class)
+            try:
+                parsed = self._parse_json(result)
+            except Exception:
+                self._flush_middleware_traces(context.get("job_id"))
+                self._trace(role, context_level, context_tokens, started, _usage_value(usage, "completion_tokens", "output_tokens"), "INVALID_OUTPUT", usage=usage)
+                raise
+            self._flush_middleware_traces(context.get("job_id"))
+            self._trace(role, context_level, context_tokens, started, _usage_value(usage, "completion_tokens", "output_tokens"), error_class, usage=usage)
             return parsed
+        self._flush_middleware_traces(context.get("job_id"))
+        self._trace(role, context_level, context_tokens, started, None, "INVALID_OUTPUT")
         raise ValueError("AgentScope agent returned unsupported output")
 
     @staticmethod
@@ -115,18 +127,30 @@ class AgentScopeRunner(AgentRunner):
         serialised = json.dumps(context, default=str)
         return context, "raw", estimate_tokens(serialised)
 
-    def _trace(self, role: str, level: str, input_tokens: int, started: float, output_tokens: int | None, error_class: str | None) -> None:
+    def _trace(self, role: str, level: str, input_tokens: int, started: float, output_tokens: int | None, error_class: str | None, usage: Any = None) -> None:
         item = {
             "role": role,
+            "phase": "runner",
             "context_level": level,
             "estimated_input_tokens": input_tokens,
             "provider_latency_ms": round((time.perf_counter() - started) * 1000, 1),
             "output_tokens": output_tokens,
+            "input_tokens": _usage_value(usage, "prompt_tokens", "input_tokens"),
+            "reasoning_tokens": _usage_value(usage, "reasoning_tokens", "reasoning_token_count"),
             "error_class": error_class,
         }
         self.traces.append(item)
         if self.trace_sink:
             self.trace_sink(item)
+
+    def _flush_middleware_traces(self, job_id: str | None) -> None:
+        while self.middleware_traces:
+            item = dict(self.middleware_traces.pop(0))
+            item["job_id"] = job_id
+            item["phase"] = "provider"
+            self.traces.append(item)
+            if self.trace_sink:
+                self.trace_sink(item)
 
     @classmethod
     def from_deepseek_env(cls, config) -> "AgentScopeRunner":
@@ -161,4 +185,4 @@ class AgentScopeRunner(AgentRunner):
             role: Agent(name=role, system_prompt=prompt, model=model, middlewares=[PRContextMiddleware(role, traces.append)])
             for role, prompt in prompts.items()
         }
-        return cls(agents)
+        return cls(agents, middleware_traces=traces)

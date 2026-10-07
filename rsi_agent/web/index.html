@@ -26,6 +26,17 @@
     .timeline div { padding:8px 0; }
     .diff-file { padding:8px 0; border-bottom:1px solid #d6d1c7; }
     .diff-file code { color:#b64b35; }
+    .tree { border:1px solid #d6d1c7; border-radius:4px; padding:8px; }
+    .tree details { margin:2px 0; }
+    .tree summary { cursor:pointer; padding:6px; color:#374246; }
+    .tree button { background:transparent; color:#b64b35; padding:4px 6px; margin-left:5px; }
+    .diff-hunk { margin:10px 0; border:1px solid #d6d1c7; border-radius:4px; overflow:auto; }
+    .diff-hunk header { padding:7px 10px; background:#e7ebe8; color:#374246; font:12px Consolas,monospace; }
+    .diff-line { display:grid; grid-template-columns:55px 55px 1fr; font:12px/1.6 Consolas,monospace; white-space:pre; }
+    .diff-line span { padding:1px 7px; }
+    .diff-line.addition { background:#e8f3e9; }
+    .diff-line.deletion { background:#f7e7e4; }
+    .diff-line.meta { color:#697376; }
   </style>
 </head>
 <body>
@@ -39,7 +50,7 @@
     function esc(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
     async function loadJobs() {
       const data = await fetch('/api/jobs').then(r => r.json());
-      content.innerHTML = data.jobs.length ? data.jobs.map(job => `<article class="card job" onclick="showJob('${esc(job.job_id)}')"><strong>${esc(job.repository)} #${job.pr_number}</strong><div class="muted">${esc(job.head_sha.slice(0, 10))} · ${esc(job.findings?.length || 0)} 个 Finding</div><div class="status">${esc(job.status)}</div></article>`).join('') : '<div class="card">暂无审查任务。</div>';
+      content.innerHTML = data.jobs.length ? data.jobs.map(job => `<article class="card job" onclick="showJob('${esc(job.job_id)}')"><strong>${esc(job.repository)} #${job.pr_number}</strong><div class="muted">${esc(job.head_sha.slice(0, 10))} · ${esc(job.finding_count || 0)} 个 Finding</div><div class="status">${esc(job.status)}</div></article>`).join('') : '<div class="card">暂无审查任务。</div>';
     }
     function openJob() { const id = document.getElementById('jobId').value.trim(); if (id) showJob(id); }
     async function showJob(id) {
@@ -49,12 +60,25 @@
       if (!response.ok) { content.innerHTML = '<div class="card">找不到该任务，请检查 Job ID。</div>'; return; }
       const job = await response.json();
       const outcome = job.outcome === 'verified_risks' ? '发现已验证风险' : job.outcome === 'no_reportable_risks' ? '未发现可报告风险' : job.outcome === 'needs_attention' ? '需要处理' : '审查进行中';
-      const findings = job.findings.length ? job.findings.map(f => `<div class="finding ${f.verification_status === 'verified' ? 'ok' : ''}"><strong>${esc(f.severity.toUpperCase())} · ${esc(f.verification_status)}</strong><p>${esc(f.claim)}</p><div class="muted">${esc(f.file)}:${f.start_line}-${f.end_line} · 风险面：${esc(f.risk_surface)}</div><div class="muted">证据：${esc(f.evidence_refs.join(', ') || '未提供')}</div></div>`).join('') : '<div class="card">检测器已完成，但没有输出可报告 Finding。该结果不等于代码绝对安全。</div>';
-      const files = job.changed_files.map(file => `<div class="diff-file"><code>${esc(file)}</code></div>`).join('');
+      const findings = job.findings.length ? job.findings.map(f => `<div class="finding ${f.verification_status === 'verified' ? 'ok' : ''}"><strong>${esc(f.severity.toUpperCase())} · ${esc(f.verification_status)}</strong><p>${esc(f.claim)}</p><div class="muted">${esc(f.file)}:${f.start_line}-${f.end_line} · 风险面：${esc(f.risk_surface)}</div><div class="muted">证据：${esc(f.evidence_refs.join(', ') || '未提供')}</div><button onclick="showDiff('${esc(f.file)}')">查看代码</button></div>`).join('') : '<div class="card">检测器已完成，但没有输出可报告 Finding。该结果不等于代码绝对安全。</div>';
+      const files = renderFileTree(job);
       const feedback = job.findings.length ? `<p><button onclick="sendFeedback('${esc(job.findings[0].finding_id)}','accepted')">确认风险</button> <button onclick="sendFeedback('${esc(job.findings[0].finding_id)}','false_positive')">标记误报</button> <button onclick="sendFeedback('${esc(job.findings[0].finding_id)}','insufficient_evidence')">证据不足</button></p>` : `<p><button onclick="sendFeedback(null,'accepted')">确认无风险</button> <button onclick="sendFeedback(null,'missed_risk')">提交漏报</button></p>`;
       const nodes = job.nodes && job.nodes.length ? `${job.nodes.length} 个节点` : '未报告';
-      content.innerHTML = `<article class="card"><h1>${esc(outcome)}</h1><p class="muted">${esc(job.repository)} #${job.pr_number} · Head ${esc(job.head_sha)}</p><span class="pill">任务状态：${esc(job.status)}</span><span class="pill">策略：${esc(job.policy_version)}</span><span class="pill">路由：${job.route ? esc(job.route.join(', ')) : '未报告'}</span></article><article class="card"><h2>Finding</h2>${findings}${feedback}</article><article class="card"><h2>涉及文件</h2>${files || '<div class="muted">未报告变更文件</div>'}</article><article class="card"><h2>审查过程</h2><div class="timeline"><div>路由与节点：${nodes}</div><div>时间与 Token：${job.budget?.status === 'not_reported' ? '未报告' : esc(JSON.stringify(job.budget))}</div><div>审计事件：${job.events?.length ? esc(job.events.length) + ' 条' : '未报告'}</div></div></article><article class="card"><h2>失败与恢复</h2><pre>${esc(JSON.stringify(job.failure, null, 2))}</pre></article><article class="card"><h2>策略演化</h2><p class="muted">反馈会进入离线聚类和 GEPA 风格的候选评测，当前页面不会直接激活策略。</p><button onclick="showEvolution()">查看演化摘要</button><div id="evolution"></div></article>`;
+      const audit = job.audit_events?.length ? job.audit_events.map(event => `<div class="timeline"><strong>${esc(event.source)} · ${esc(event.node)}</strong><div>${esc(event.event_type)} — ${esc(event.status)}${event.error_class ? ' · '+esc(event.error_class) : ''}</div><div class="muted">${esc(event.duration_ms ?? '未报告')} ms · ${esc(JSON.stringify(event.metadata || {}))}</div></div>`).join('') : '<div class="muted">审计事件未报告</div>';
+      const budget = job.budget?.configured ? `<div class="timeline"><div>配置：max ${esc(job.budget.configured.max_tokens ?? '未报告')} tokens · Provider ${esc(job.budget.configured.provider_timeout_seconds ?? '未报告')}s · Worker ${esc(job.budget.configured.node_timeout_seconds ?? '未报告')}s · 思考 ${esc(job.budget.configured.thinking_mode ?? '未报告')}</div><div>Provider 输入/输出/推理 Token：${esc(job.budget.observed?.provider_input_tokens ?? '未报告')} / ${esc(job.budget.observed?.provider_output_tokens ?? '未报告')} / ${esc(job.budget.observed?.provider_reasoning_tokens ?? '未报告')}</div><div>估算输入 Token：${esc(job.budget.estimated?.input_tokens ?? '未报告')} · 最近节点耗时：${esc(job.budget.observed?.last_node_duration_ms ?? '未报告')} ms · 全程：${esc(job.budget.observed?.review_duration_ms ?? '未报告')} ms</div></div>` : '<div class="muted">预算信息未报告</div>';
+      const events = (job.events || []).map(event => `<div class="timeline"><div>${esc(event.from || '创建')} → ${esc(event.to)} <span class="muted">${esc(event.at)}</span></div></div>`).join('') || '<div class="muted">状态迁移未报告</div>';
+      const failure = job.failure?.class ? `${job.failure.class}: ${job.failure.error || job.failure.code || ''}\n处理建议：${job.failure_guidance?.action || '查看日志'}` : '无失败记录';
+      content.innerHTML = `<article class="card"><h1>${esc(outcome)}</h1><p class="muted">${esc(job.repository)} #${job.pr_number} · Head ${esc(job.head_sha)}</p><span class="pill">任务状态：${esc(job.status)}</span><span class="pill">策略：${esc(job.policy_version)}</span><span class="pill">路由：${job.route ? esc(job.route.join(', ')) : '未报告'}</span></article><article class="card"><h2>Finding</h2>${findings}${feedback}</article><article class="card"><h2>涉及文件</h2>${files || '<div class="muted">未报告变更文件</div>'}<div id="diff-view" class="diff-file">选择文件查看 Diff hunk</div></article><article class="card"><h2>审查过程</h2><div class="timeline"><div>执行节点：${nodes}</div>${budget}</div><h3>状态变化</h3>${events}<h3>运行审计</h3>${audit}</article><article class="card"><h2>失败与恢复</h2><pre>${esc(failure)}</pre><span class="muted">建议自动重试：${job.failure_guidance?.retryable ? '是' : '否'}</span></article><article class="card"><h2>策略演化</h2><p class="muted">反馈会进入离线聚类和 GEPA 风格的候选评测，当前页面不会直接激活策略。</p><button onclick="showEvolution()">查看演化摘要</button><div id="evolution"></div></article>`;
     }
+    function renderFileTree(job) {
+      const files = job.diff?.files || job.changed_files.map(path => ({path, status:'unknown', parse_status:'not_reported', hunks:[], finding_ids:[]}));
+      const roots = {};
+      for (const file of files) { const parts = file.path.split('/'); let node = roots; for (const part of parts.slice(0,-1)) node = node[part] || (node[part] = {_children:{}}); (node._files || (node._files=[])).push({...file, name:parts.at(-1)}); }
+      function branch(node, prefix='') { return Object.entries(node).filter(([key])=>key !== '_files').sort().map(([name, child])=>`<details ${hasFinding(child) ? 'open' : ''}><summary>${esc(name)}/</summary>${branch(child,prefix+name+'/')}</details>`).join('') + (node._files||[]).sort((a,b)=>a.name.localeCompare(b.name)).map(file=>`<div class="diff-file"><code>${esc(file.name)}</code> <span class="muted">${esc(file.status)} · ${file.finding_ids.length} 个 Finding</span><button onclick="showDiff('${esc(file.path)}')">查看代码</button></div>`).join(''); }
+      function hasFinding(node) { return (node._files || []).some(file => file.finding_ids.length) || Object.entries(node).some(([key, child]) => key !== '_files' && hasFinding(child)); }
+      window.__diffFiles = files; return `<div class="tree"><div class="muted">目录默认收起，有 Finding 的文件可直接查看</div>${branch(roots)}</div>`;
+    }
+    function showDiff(path) { const file = (window.__diffFiles || []).find(item => item.path === path); const target = document.getElementById('diff-view'); if (!file || !file.hunks.length) { target.innerHTML = `<strong>${esc(path)}</strong><p class="muted">该文件没有可解析的 hunk（${esc(file?.parse_status || 'not_reported')}）。</p>`; return; } target.innerHTML = `<strong>${esc(path)}</strong>` + file.hunks.map(hunk => `<div class="diff-hunk"><header>${esc(hunk.header)}</header>${hunk.lines.map(line => `<div class="diff-line ${esc(line.kind)}"><span>${line.old ?? ''}</span><span>${line.new ?? ''}</span><span>${esc(line.text)}</span></div>`).join('')}</div>`).join(''); target.scrollIntoView({behavior:'smooth',block:'nearest'}); }
     async function showEvolution() { const data = await fetch('/api/evolution').then(r => r.json()); document.getElementById('evolution').innerHTML = `<p class="muted">反馈总数：${data.feedback_count} · ${esc(data.note)}</p>`; }
     async function sendFeedback(findingId, kind) { const note = kind === 'missed_risk' ? window.prompt('请说明漏报风险和位置：') : ''; if (kind === 'missed_risk' && !note) return; const response = await fetch('/api/jobs/' + encodeURIComponent(document.getElementById('jobId').value || '') + '/feedback', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event_id:'ui-' + Date.now(), kind, finding_id:findingId, note})}); if (response.ok) alert('反馈已记录，将进入离线评测流程。'); else alert('反馈提交失败，请检查 Job ID。'); }
     loadJobs();

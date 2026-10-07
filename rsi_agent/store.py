@@ -2,10 +2,19 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import asdict
+from uuid import uuid4
+from dataclasses import is_dataclass, asdict
 from pathlib import Path
 
 from .models import Finding, JobStatus, PRSnapshot, ReviewJob, RiskSurface, utc_now
+
+
+def _json_default(value):
+    if hasattr(value, "value"):
+        return value.value
+    if is_dataclass(value):
+        return asdict(value)
+    return str(value)
 
 
 class TaskStore:
@@ -81,6 +90,24 @@ class TaskStore:
                 nodes_json TEXT NOT NULL,
                 budget_json TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS review_audit_events (
+                event_id TEXT PRIMARY KEY,
+                schema_version INTEGER NOT NULL,
+                job_id TEXT NOT NULL,
+                attempt INTEGER NOT NULL DEFAULT 0,
+                trace_id TEXT,
+                source TEXT NOT NULL,
+                node TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                duration_ms REAL,
+                error_class TEXT,
+                error_code TEXT,
+                metadata_json TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_job ON review_audit_events(job_id, event_id);
             """
         )
         columns = {row[1] for row in self.connection.execute("PRAGMA table_info(review_jobs)")}
@@ -215,7 +242,7 @@ class TaskStore:
     def save_runtime(self, job_id: str, route: tuple[str, ...], features: object, nodes: list[dict], budget: dict) -> None:
         self.connection.execute(
             "INSERT OR REPLACE INTO review_runtime VALUES (?, ?, ?, ?, ?)",
-            (job_id, json.dumps(route), json.dumps(features, default=lambda value: value.value if hasattr(value, "value") else str(value)), json.dumps(nodes), json.dumps(budget)),
+            (job_id, json.dumps(route), json.dumps(features, default=_json_default), json.dumps(nodes, default=_json_default), json.dumps(budget, default=_json_default)),
         )
         self.connection.commit()
 
@@ -228,6 +255,54 @@ class TaskStore:
     def events_for_job(self, job_id: str) -> tuple[dict, ...]:
         rows = self.connection.execute("SELECT from_status,to_status,created_at FROM review_events WHERE job_id=? ORDER BY id", (job_id,)).fetchall()
         return tuple({"from": row["from_status"], "to": row["to_status"], "at": row["created_at"]} for row in rows)
+
+    def record_audit_event(
+        self,
+        job_id: str,
+        source: str,
+        node: str,
+        event_type: str,
+        status: str = "completed",
+        *,
+        event_id: str | None = None,
+        attempt: int = 0,
+        trace_id: str | None = None,
+        started_at: str | None = None,
+        finished_at: str | None = None,
+        duration_ms: float | None = None,
+        error_class: str | None = None,
+        error_code: str | None = None,
+        metadata: dict | None = None,
+    ) -> bool:
+        event_id = event_id or str(uuid4())
+        try:
+            self.connection.execute(
+                """INSERT INTO review_audit_events
+                (event_id,schema_version,job_id,attempt,trace_id,source,node,event_type,status,
+                 started_at,finished_at,duration_ms,error_class,error_code,metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (event_id, 1, job_id, attempt, trace_id, source, node, event_type, status,
+                 started_at, finished_at, duration_ms, error_class, error_code,
+                 json.dumps(metadata or {}, sort_keys=True, default=str)),
+            )
+            self.connection.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+    def audit_events_for_job(self, job_id: str) -> tuple[dict, ...]:
+        rows = self.connection.execute(
+            "SELECT * FROM review_audit_events WHERE job_id=? ORDER BY rowid", (job_id,)
+        ).fetchall()
+        return tuple({
+            "event_id": row["event_id"], "schema_version": row["schema_version"],
+            "job_id": row["job_id"], "attempt": row["attempt"], "trace_id": row["trace_id"],
+            "source": row["source"], "node": row["node"], "event_type": row["event_type"],
+            "status": row["status"], "started_at": row["started_at"],
+            "finished_at": row["finished_at"], "duration_ms": row["duration_ms"],
+            "error_class": row["error_class"], "error_code": row["error_code"],
+            "metadata": json.loads(row["metadata_json"]),
+        } for row in rows)
 
     def find_job(self, snapshot: PRSnapshot, policy_version: str) -> ReviewJob | None:
         row = self.connection.execute(
