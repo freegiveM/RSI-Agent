@@ -5,15 +5,25 @@ import sqlite3
 from dataclasses import asdict
 from pathlib import Path
 
-from .models import JobStatus, PRSnapshot, ReviewJob, utc_now
+from .models import Finding, JobStatus, PRSnapshot, ReviewJob, RiskSurface, utc_now
 
 
 class TaskStore:
     """Small durable store for idempotent review jobs and state transitions."""
 
     def __init__(self, path: str | Path = ":memory:") -> None:
+        if str(path) != ":memory:":
+            Path(path).expanduser().parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
+        self.connection.execute("PRAGMA busy_timeout=5000")
+        self.connection.execute("PRAGMA foreign_keys=ON")
+        if str(path) != ":memory:":
+            try:
+                self.connection.execute("PRAGMA journal_mode=WAL")
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower():
+                    raise
         self._create_schema()
 
     def _create_schema(self) -> None:
@@ -36,6 +46,13 @@ class TaskStore:
                 diff TEXT NOT NULL,
                 status TEXT NOT NULL,
                 created_at TEXT NOT NULL,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                failure_class TEXT,
+                failure_code TEXT,
+                last_error TEXT,
+                updated_at TEXT NOT NULL,
+                lease_owner TEXT,
+                lease_until TEXT,
                 UNIQUE(repo_id, pr_number, head_sha, policy_version)
             );
             CREATE TABLE IF NOT EXISTS review_events (
@@ -45,8 +62,40 @@ class TaskStore:
                 to_status TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS findings (
+                finding_id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                risk_surface TEXT NOT NULL,
+                claim TEXT NOT NULL,
+                file TEXT NOT NULL,
+                start_line INTEGER NOT NULL,
+                end_line INTEGER NOT NULL,
+                evidence_refs_json TEXT NOT NULL,
+                verification_status TEXT NOT NULL,
+                severity TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS review_runtime (
+                job_id TEXT PRIMARY KEY,
+                route_json TEXT NOT NULL,
+                features_json TEXT NOT NULL,
+                nodes_json TEXT NOT NULL,
+                budget_json TEXT NOT NULL
+            );
             """
         )
+        columns = {row[1] for row in self.connection.execute("PRAGMA table_info(review_jobs)")}
+        for name, definition in {
+            "attempt_count": "INTEGER NOT NULL DEFAULT 0",
+            "failure_class": "TEXT",
+            "failure_code": "TEXT",
+            "last_error": "TEXT",
+            "updated_at": "TEXT",
+            "lease_owner": "TEXT",
+            "lease_until": "TEXT",
+        }.items():
+            if name not in columns:
+                self.connection.execute(f"ALTER TABLE review_jobs ADD COLUMN {name} {definition}")
+        self.connection.execute("UPDATE review_jobs SET updated_at=created_at WHERE updated_at IS NULL")
         self.connection.commit()
 
     def record_event(self, event_id: str, event_name: str, payload: dict) -> bool:
@@ -68,10 +117,10 @@ class TaskStore:
         if row:
             return self._job_from_row(row)
         self.connection.execute(
-            "INSERT INTO review_jobs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO review_jobs(job_id,repo_id,pr_number,base_sha,head_sha,policy_version,changed_files_json,diff,status,created_at,updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (job.job_id, job.snapshot.repo_id, job.snapshot.pr_number, job.snapshot.base_sha,
              job.snapshot.head_sha, job.policy_version, json.dumps(job.snapshot.changed_files),
-             job.snapshot.diff, job.status.value, job.created_at),
+             job.snapshot.diff, job.status.value, job.created_at, job.created_at),
         )
         self.connection.execute(
             "INSERT INTO review_events(job_id, from_status, to_status, created_at) VALUES (?, ?, ?, ?)",
@@ -82,8 +131,8 @@ class TaskStore:
 
     def transition(self, job_id: str, expected: JobStatus, target: JobStatus) -> None:
         cursor = self.connection.execute(
-            "UPDATE review_jobs SET status=? WHERE job_id=? AND status=?",
-            (target.value, job_id, expected.value),
+            "UPDATE review_jobs SET status=?, updated_at=? WHERE job_id=? AND status=?",
+            (target.value, utc_now(), job_id, expected.value),
         )
         if cursor.rowcount != 1:
             raise ValueError(f"invalid transition for {job_id}: {expected} -> {target}")
@@ -93,11 +142,92 @@ class TaskStore:
         )
         self.connection.commit()
 
+    def begin_attempt(self, job_id: str, owner: str, lease_seconds: int = 120) -> bool:
+        now = utc_now()
+        from datetime import datetime, timedelta, timezone
+        lease_until = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
+        cursor = self.connection.execute(
+            "UPDATE review_jobs SET attempt_count=attempt_count+1, updated_at=?, lease_owner=?, lease_until=? WHERE job_id=? AND (lease_until IS NULL OR lease_until < ? OR lease_owner=?)",
+            (now, owner, lease_until, job_id, now, owner),
+        )
+        self.connection.commit()
+        return cursor.rowcount == 1
+
+    def clear_lease(self, job_id: str) -> None:
+        self.connection.execute("UPDATE review_jobs SET lease_owner=NULL, lease_until=NULL, updated_at=? WHERE job_id=?", (utc_now(), job_id))
+        self.connection.commit()
+
+    def recover_interrupted(self, job_id: str) -> None:
+        row = self.connection.execute("SELECT status FROM review_jobs WHERE job_id=?", (job_id,)).fetchone()
+        if row and row[0] in {JobStatus.ANALYZING.value, JobStatus.VERIFYING.value}:
+            self.connection.execute("UPDATE review_jobs SET status=?, lease_owner=NULL, lease_until=NULL, updated_at=? WHERE job_id=?", (JobStatus.RECEIVED.value, utc_now(), job_id))
+            self.connection.execute("INSERT INTO review_events(job_id, from_status, to_status, created_at) VALUES (?, ?, ?, ?)", (job_id, row[0], JobStatus.RECEIVED.value, utc_now()))
+            self.connection.commit()
+
+    def mark_failed(self, job_id: str, failure_class: str, failure_code: str, error: str) -> None:
+        detail = error[:1000]
+        previous = self.connection.execute("SELECT status FROM review_jobs WHERE job_id=?", (job_id,)).fetchone()
+        self.connection.execute("UPDATE review_jobs SET status=?, failure_class=?, failure_code=?, last_error=?, lease_owner=NULL, lease_until=NULL, updated_at=? WHERE job_id=?", (JobStatus.FAILED.value, failure_class, failure_code, detail, utc_now(), job_id))
+        if previous and previous[0] != JobStatus.FAILED.value:
+            self.connection.execute("INSERT INTO review_events(job_id, from_status, to_status, created_at) VALUES (?, ?, ?, ?)", (job_id, previous[0], JobStatus.FAILED.value, utc_now()))
+        self.connection.commit()
+
+    def retry_failed(self, job_id: str) -> None:
+        self.connection.execute("UPDATE review_jobs SET status=?, lease_owner=NULL, lease_until=NULL, updated_at=? WHERE job_id=? AND status=?", (JobStatus.RECEIVED.value, utc_now(), job_id, JobStatus.FAILED.value))
+        self.connection.execute("INSERT INTO review_events(job_id, from_status, to_status, created_at) VALUES (?, ?, ?, ?)", (job_id, JobStatus.FAILED.value, JobStatus.RECEIVED.value, utc_now()))
+        self.connection.commit()
+
+    def mark_stale(self, job_id: str, reason: str = "head_changed") -> None:
+        self.connection.execute("UPDATE review_jobs SET status=?, failure_class=?, failure_code=?, last_error=?, updated_at=? WHERE job_id=?", (JobStatus.STALE.value, "STALE_HEAD", reason, reason, utc_now(), job_id))
+        self.connection.commit()
+
     def get_job(self, job_id: str) -> ReviewJob:
         row = self.connection.execute("SELECT * FROM review_jobs WHERE job_id=?", (job_id,)).fetchone()
         if not row:
             raise KeyError(job_id)
         return self._job_from_row(row)
+
+    def list_jobs(self, limit: int = 50) -> tuple[ReviewJob, ...]:
+        rows = self.connection.execute(
+            "SELECT * FROM review_jobs ORDER BY updated_at DESC LIMIT ?", (max(1, min(limit, 200)),)
+        ).fetchall()
+        return tuple(self._job_from_row(row) for row in rows)
+
+    def save_findings(self, findings: tuple[Finding, ...]) -> None:
+        for finding in findings:
+            self.connection.execute(
+                "INSERT OR REPLACE INTO findings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (finding.finding_id, finding.job_id, finding.risk_surface.value, finding.claim,
+                 finding.file, finding.start_line, finding.end_line, json.dumps(finding.evidence_refs),
+                 finding.verification_status, finding.severity),
+            )
+        self.connection.commit()
+
+    def findings_for_job(self, job_id: str) -> tuple[Finding, ...]:
+        job = self.get_job(job_id)
+        rows = self.connection.execute("SELECT * FROM findings WHERE job_id=? ORDER BY finding_id", (job_id,)).fetchall()
+        return tuple(Finding(
+            row["finding_id"], job_id, job.snapshot, RiskSurface(row["risk_surface"]), row["claim"],
+            row["file"], row["start_line"], row["end_line"], tuple(json.loads(row["evidence_refs_json"])),
+            row["verification_status"], row["severity"],
+        ) for row in rows)
+
+    def save_runtime(self, job_id: str, route: tuple[str, ...], features: object, nodes: list[dict], budget: dict) -> None:
+        self.connection.execute(
+            "INSERT OR REPLACE INTO review_runtime VALUES (?, ?, ?, ?, ?)",
+            (job_id, json.dumps(route), json.dumps(features, default=lambda value: value.value if hasattr(value, "value") else str(value)), json.dumps(nodes), json.dumps(budget)),
+        )
+        self.connection.commit()
+
+    def runtime_for_job(self, job_id: str) -> dict | None:
+        row = self.connection.execute("SELECT * FROM review_runtime WHERE job_id=?", (job_id,)).fetchone()
+        if not row:
+            return None
+        return {"route": json.loads(row["route_json"]), "risk_features": json.loads(row["features_json"]), "nodes": json.loads(row["nodes_json"]), "budget": json.loads(row["budget_json"])}
+
+    def events_for_job(self, job_id: str) -> tuple[dict, ...]:
+        rows = self.connection.execute("SELECT from_status,to_status,created_at FROM review_events WHERE job_id=? ORDER BY id", (job_id,)).fetchall()
+        return tuple({"from": row["from_status"], "to": row["to_status"], "at": row["created_at"]} for row in rows)
 
     def find_job(self, snapshot: PRSnapshot, policy_version: str) -> ReviewJob | None:
         row = self.connection.execute(
@@ -112,4 +242,4 @@ class TaskStore:
             row["repo_id"], row["pr_number"], row["base_sha"], row["head_sha"],
             tuple(json.loads(row["changed_files_json"])), row["diff"],
         )
-        return ReviewJob(row["job_id"], snapshot, row["policy_version"], JobStatus(row["status"]), row["created_at"])
+        return ReviewJob(row["job_id"], snapshot, row["policy_version"], JobStatus(row["status"]), row["created_at"], row["attempt_count"] or 0, row["failure_class"], row["failure_code"], row["last_error"])

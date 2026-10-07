@@ -58,6 +58,10 @@ class ReviewJob:
     policy_version: str
     status: JobStatus = JobStatus.RECEIVED
     created_at: str = field(default_factory=utc_now)
+    attempt_count: int = 0
+    failure_class: str | None = None
+    failure_code: str | None = None
+    last_error: str | None = None
 
 
 @dataclass(frozen=True)

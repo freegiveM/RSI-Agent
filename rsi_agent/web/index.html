@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RSI-Agent 审查控制台</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, "Segoe UI", system-ui, sans-serif; }
+    body { margin: 0; background: #f2f0eb; color: #222b2e; }
+    header { padding: 20px 5vw; background: #222b2e; color: #f7f5ee; }
+    main { max-width: 1100px; margin: 24px auto; padding: 0 18px; }
+    button, input { font: inherit; padding: 8px 10px; border: 1px solid #cbd3e1; border-radius: 5px; }
+    button { cursor: pointer; background: #222b2e; color: #fffdf8; border: 0; }
+    .toolbar { display: flex; gap: 8px; margin-bottom: 18px; }
+    .toolbar input { flex: 1; }
+    .card { background: #fffdf8; border: 1px solid #d6d1c7; border-radius: 5px; padding: 18px; margin-bottom: 14px; }
+    .job { cursor: pointer; }
+    .job:hover { border-color: #2563eb; }
+    .muted { color: #697376; font-size: 13px; }
+    .status { font-weight: 700; }
+    pre { white-space: pre-wrap; background: #f1f5f9; padding: 12px; border-radius: 4px; }
+    .finding { border-left: 4px solid #b64b35; padding-left: 12px; margin: 12px 0; }
+    .finding.ok { border-color: #28704b; }
+    .pill { display:inline-block; padding:6px 9px; background:#e7ebe8; border-radius:4px; margin:4px 4px 4px 0; font-size:13px; }
+    .timeline { border-left:2px solid #d6d1c7; padding-left:16px; }
+    .timeline div { padding:8px 0; }
+    .diff-file { padding:8px 0; border-bottom:1px solid #d6d1c7; }
+    .diff-file code { color:#b64b35; }
+  </style>
+</head>
+<body>
+  <header><strong>RSI-Agent</strong> <span class="muted" style="color:#c8d0cc">审查控制台</span></header>
+  <main>
+    <div class="toolbar"><input id="jobId" placeholder="输入 Job ID，或从列表选择任务" /><button onclick="openJob()">打开报告</button><button onclick="loadJobs()">刷新任务</button></div>
+    <section id="content"><div class="card">Loading jobs...</div></section>
+  </main>
+  <script>
+    const content = document.getElementById('content');
+    function esc(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    async function loadJobs() {
+      const data = await fetch('/api/jobs').then(r => r.json());
+      content.innerHTML = data.jobs.length ? data.jobs.map(job => `<article class="card job" onclick="showJob('${esc(job.job_id)}')"><strong>${esc(job.repository)} #${job.pr_number}</strong><div class="muted">${esc(job.head_sha.slice(0, 10))} · ${esc(job.findings?.length || 0)} 个 Finding</div><div class="status">${esc(job.status)}</div></article>`).join('') : '<div class="card">暂无审查任务。</div>';
+    }
+    function openJob() { const id = document.getElementById('jobId').value.trim(); if (id) showJob(id); }
+    async function showJob(id) {
+      document.getElementById('jobId').value = id;
+      document.getElementById('jobId').value = id;
+      const response = await fetch('/api/jobs/' + encodeURIComponent(id));
+      if (!response.ok) { content.innerHTML = '<div class="card">找不到该任务，请检查 Job ID。</div>'; return; }
+      const job = await response.json();
+      const outcome = job.outcome === 'verified_risks' ? '发现已验证风险' : job.outcome === 'no_reportable_risks' ? '未发现可报告风险' : job.outcome === 'needs_attention' ? '需要处理' : '审查进行中';
+      const findings = job.findings.length ? job.findings.map(f => `<div class="finding ${f.verification_status === 'verified' ? 'ok' : ''}"><strong>${esc(f.severity.toUpperCase())} · ${esc(f.verification_status)}</strong><p>${esc(f.claim)}</p><div class="muted">${esc(f.file)}:${f.start_line}-${f.end_line} · 风险面：${esc(f.risk_surface)}</div><div class="muted">证据：${esc(f.evidence_refs.join(', ') || '未提供')}</div></div>`).join('') : '<div class="card">检测器已完成，但没有输出可报告 Finding。该结果不等于代码绝对安全。</div>';
+      const files = job.changed_files.map(file => `<div class="diff-file"><code>${esc(file)}</code></div>`).join('');
+      const feedback = job.findings.length ? `<p><button onclick="sendFeedback('${esc(job.findings[0].finding_id)}','accepted')">确认风险</button> <button onclick="sendFeedback('${esc(job.findings[0].finding_id)}','false_positive')">标记误报</button> <button onclick="sendFeedback('${esc(job.findings[0].finding_id)}','insufficient_evidence')">证据不足</button></p>` : `<p><button onclick="sendFeedback(null,'accepted')">确认无风险</button> <button onclick="sendFeedback(null,'missed_risk')">提交漏报</button></p>`;
+      const nodes = job.nodes && job.nodes.length ? `${job.nodes.length} 个节点` : '未报告';
+      content.innerHTML = `<article class="card"><h1>${esc(outcome)}</h1><p class="muted">${esc(job.repository)} #${job.pr_number} · Head ${esc(job.head_sha)}</p><span class="pill">任务状态：${esc(job.status)}</span><span class="pill">策略：${esc(job.policy_version)}</span><span class="pill">路由：${job.route ? esc(job.route.join(', ')) : '未报告'}</span></article><article class="card"><h2>Finding</h2>${findings}${feedback}</article><article class="card"><h2>涉及文件</h2>${files || '<div class="muted">未报告变更文件</div>'}</article><article class="card"><h2>审查过程</h2><div class="timeline"><div>路由与节点：${nodes}</div><div>时间与 Token：${job.budget?.status === 'not_reported' ? '未报告' : esc(JSON.stringify(job.budget))}</div><div>审计事件：${job.events?.length ? esc(job.events.length) + ' 条' : '未报告'}</div></div></article><article class="card"><h2>失败与恢复</h2><pre>${esc(JSON.stringify(job.failure, null, 2))}</pre></article><article class="card"><h2>策略演化</h2><p class="muted">反馈会进入离线聚类和 GEPA 风格的候选评测，当前页面不会直接激活策略。</p><button onclick="showEvolution()">查看演化摘要</button><div id="evolution"></div></article>`;
+    }
+    async function showEvolution() { const data = await fetch('/api/evolution').then(r => r.json()); document.getElementById('evolution').innerHTML = `<p class="muted">反馈总数：${data.feedback_count} · ${esc(data.note)}</p>`; }
+    async function sendFeedback(findingId, kind) { const note = kind === 'missed_risk' ? window.prompt('请说明漏报风险和位置：') : ''; if (kind === 'missed_risk' && !note) return; const response = await fetch('/api/jobs/' + encodeURIComponent(document.getElementById('jobId').value || '') + '/feedback', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event_id:'ui-' + Date.now(), kind, finding_id:findingId, note})}); if (response.ok) alert('反馈已记录，将进入离线评测流程。'); else alert('反馈提交失败，请检查 Job ID。'); }
+    loadJobs();
+  </script>
+</body>
+</html>

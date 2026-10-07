@@ -36,6 +36,8 @@ class AppConfig:
     deepseek_model: str = "deepseek-v4-pro"
     deepseek_max_tokens: int = 4096
     deepseek_temperature: float = 0.0
+    deepseek_timeout_seconds: float = 60.0
+    deepseek_thinking: str = "disabled"
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -55,6 +57,8 @@ class AppConfig:
             os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
             os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro"), int(os.getenv("DEEPSEEK_MAX_TOKENS", "4096")),
             float(os.getenv("DEEPSEEK_TEMPERATURE", "0")),
+            float(os.getenv("DEEPSEEK_TIMEOUT_SECONDS", "60")),
+            os.getenv("DEEPSEEK_THINKING", "disabled"),
         )
 
     def validate_api(self) -> None:
@@ -66,7 +70,25 @@ class AppConfig:
             raise ValueError("missing required configuration: " + ", ".join(missing))
 
     def validate_mode(self) -> None:
+        if self.deepseek_thinking not in {"disabled", "enabled"}:
+            raise ValueError("DEEPSEEK_THINKING must be disabled or enabled")
         if self.deployment_mode not in {"local", "remote"}:
             raise ValueError("DEPLOYMENT_MODE must be local or remote")
         if not self.redis_url:
             raise ValueError("REDIS_URL must not be empty")
+
+    @property
+    def is_deep_reasoning(self) -> bool:
+        return self.deepseek_thinking == "enabled"
+
+    @property
+    def agent_timeout_seconds(self) -> float:
+        return max(self.deepseek_timeout_seconds + 15.0, 150.0 if self.is_deep_reasoning else 75.0)
+
+    @property
+    def provider_timeout_seconds(self) -> float:
+        return max(self.deepseek_timeout_seconds, 120.0) if self.is_deep_reasoning else self.deepseek_timeout_seconds
+
+    @property
+    def agent_max_tokens(self) -> int:
+        return max(self.deepseek_max_tokens, 8192 if self.is_deep_reasoning else 4096)

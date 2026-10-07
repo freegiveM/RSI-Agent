@@ -4,7 +4,7 @@ The repository owns the review contracts. AgentScope is an execution adapter, no
 
 ## Adapter boundary
 
-`AgentRunner.run(role, context, tools)` is the stable project interface. The current tests use `DeterministicAgentRunner`, so the workflow is testable without credentials. A later adapter can translate this call into AgentScope agents, tool calls, sessions and traces without changing routing, evidence validation or persistence.
+`AgentRunner.run(role, context, tools)` is the stable project interface. The project pins AgentScope `2.0.9`; `AgentScopeRunner.from_deepseek_env()` builds an OpenAI-compatible `OpenAIChatModel` and three role-specific `Agent` instances. The deterministic runner remains available for tests, so the workflow is testable without credentials.
 
 ## Agent responsibilities
 
