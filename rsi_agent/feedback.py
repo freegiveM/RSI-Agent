@@ -14,6 +14,8 @@ class FeedbackStore:
     def __init__(self, path: str | Path = ":memory:") -> None:
         self.connection = sqlite3.connect(path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
+        # The API may share the review database file with the worker.
+        self.connection.execute("PRAGMA busy_timeout=5000")
         self.connection.executescript(
             """
             CREATE TABLE IF NOT EXISTS feedback_events (
@@ -61,7 +63,19 @@ class FeedbackStore:
 
     def feedback(self) -> tuple[FeedbackEvent, ...]:
         rows = self.connection.execute("SELECT * FROM feedback_events ORDER BY created_at").fetchall()
-        return tuple(FeedbackEvent(row["event_id"], row["repo_id"], row["pr_number"], row["head_sha"], FeedbackKind(row["kind"]), row["finding_id"], row["note"], row["reporter"], row["created_at"]) for row in rows)
+        return tuple(self._event_from_row(row) for row in rows)
+
+    def feedback_for_head(self, repo_id: str, pr_number: int, head_sha: str) -> tuple[FeedbackEvent, ...]:
+        """Feedback is bound to an immutable head, so a report only shows events for its own snapshot."""
+        rows = self.connection.execute(
+            "SELECT * FROM feedback_events WHERE repo_id=? AND pr_number=? AND head_sha=? ORDER BY created_at",
+            (repo_id, pr_number, head_sha),
+        ).fetchall()
+        return tuple(self._event_from_row(row) for row in rows)
+
+    @staticmethod
+    def _event_from_row(row: sqlite3.Row) -> FeedbackEvent:
+        return FeedbackEvent(row["event_id"], row["repo_id"], row["pr_number"], row["head_sha"], FeedbackKind(row["kind"]), row["finding_id"], row["note"], row["reporter"], row["created_at"])
 
     def add_candidate(self, candidate: PolicyCandidate) -> None:
         self.connection.execute(

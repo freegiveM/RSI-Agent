@@ -15,6 +15,13 @@ from .models import FeedbackEvent, FeedbackKind
 from .diff import attach_findings, parse_unified_diff
 
 
+WEB_DIR = Path(__file__).parent / "web"
+WEB_ASSETS = {
+    "console.css": "text/css; charset=utf-8",
+    "app.js": "text/javascript; charset=utf-8",
+}
+
+
 def create_app(service: ReviewService, reader: GitHubReader, queue: ReviewQueue | None = None, webhook_secret: str | None = None) -> FastAPI:
     app = FastAPI(title="RSI-Agent")
     review_queue = queue or ReviewQueue()
@@ -67,8 +74,17 @@ def create_app(service: ReviewService, reader: GitHubReader, queue: ReviewQueue 
     @app.get("/", include_in_schema=False)
     def report_page() -> Any:
         from fastapi.responses import HTMLResponse
-        html = (Path(__file__).parent / "web" / "index.html").read_text(encoding="utf-8")
-        return HTMLResponse(html)
+        html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+        return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+
+    @app.get("/assets/{name}", include_in_schema=False)
+    def report_asset(name: str) -> Any:
+        from fastapi.responses import Response
+        # Only a fixed allowlist is served; request paths never touch the filesystem directly.
+        media_type = WEB_ASSETS.get(name)
+        if media_type is None:
+            raise HTTPException(status_code=404, detail="asset not found")
+        return Response((WEB_DIR / name).read_bytes(), media_type=media_type, headers={"Cache-Control": "no-cache"})
 
     @app.post("/webhooks/github", status_code=202)
     async def github_webhook(request: Request, x_github_event: str | None = Header(default=None), x_github_delivery: str | None = Header(default=None), x_hub_signature_256: str | None = Header(default=None)) -> dict[str, Any]:
@@ -124,6 +140,7 @@ def _job_view(service: ReviewService, job_id: str) -> dict[str, Any]:
         "status": job.status.value,
         "outcome": outcome,
         "created_at": job.created_at,
+        "attempt_count": job.attempt_count,
         "policy_version": job.policy_version,
         "changed_files": list(job.snapshot.changed_files),
         "diff": {"files": [item.as_dict() for item in diff_files]},
@@ -149,6 +166,10 @@ def _job_view(service: ReviewService, job_id: str) -> dict[str, Any]:
         "budget": runtime["budget"] if runtime else {"status": "not_reported"},
         "events": list(service.store.events_for_job(job_id)),
         "audit_events": list(service.store.audit_events_for_job(job_id)),
+        "feedback": [
+            {"event_id": item.event_id, "kind": item.kind.value, "finding_id": item.finding_id, "note": item.note, "created_at": item.created_at}
+            for item in service.feedback_store.feedback_for_head(job.snapshot.repo_id, job.snapshot.pr_number, job.snapshot.head_sha)
+        ],
     }
 
 
@@ -165,9 +186,10 @@ def _job_summary(service: ReviewService, job_id: str) -> dict[str, Any]:
     return {
         "job_id": job.job_id, "repository": job.snapshot.repo_id,
         "pr_number": job.snapshot.pr_number, "head_sha": job.snapshot.head_sha,
-        "status": job.status.value, "outcome": outcome,
+        "status": job.status.value, "outcome": outcome, "created_at": job.created_at,
         "policy_version": job.policy_version, "changed_files": list(job.snapshot.changed_files),
         "finding_count": len(findings),
+        "verified_count": sum(item.verification_status == "verified" for item in findings),
         "failure": {"class": job.failure_class, "code": job.failure_code},
     }
 

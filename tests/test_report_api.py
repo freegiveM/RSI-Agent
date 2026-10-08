@@ -42,7 +42,27 @@ def test_report_api_exposes_persisted_findings():
     assert feedback.json()["duplicate"] is False
     duplicate = client.post(f"/api/jobs/{job.job_id}/feedback", json={"event_id": "ui-1", "kind": "accepted", "finding_id": "f-1"})
     assert duplicate.json()["duplicate"] is True
-    assert "RSI-Agent" in client.get("/").text
+    detail = client.get(f"/api/jobs/{job.job_id}").json()
+    assert [item["kind"] for item in detail["feedback"]] == ["accepted"]
+    assert detail["attempt_count"] == 1
+    listing = client.get("/api/jobs").json()["jobs"][0]
+    assert listing["verified_count"] == 1 and listing["created_at"]
     page = client.get("/").text
-    assert "document.getElementById('jobId').value = id" in page
-    assert "loadJobs();\n  </script>" in page
+    assert "RSI-Agent" in page
+    assert '<script src="/assets/app.js" defer></script>' in page
+    script = client.get("/assets/app.js")
+    assert script.status_code == 200 and "javascript" in script.headers["content-type"]
+    assert client.get("/assets/console.css").headers["content-type"].startswith("text/css")
+    # Only allowlisted assets are served; traversal-like names never reach the filesystem.
+    assert client.get("/assets/index.html").status_code == 404
+    assert client.get("/assets/..%2Fapi.py").status_code == 404
+
+
+def test_feedback_for_head_only_returns_matching_snapshot():
+    from rsi_agent.feedback import FeedbackStore
+    from rsi_agent.models import FeedbackEvent, FeedbackKind
+
+    store = FeedbackStore()
+    store.record_feedback(FeedbackEvent("a", "org/repo", 3, "head", FeedbackKind.ACCEPTED))
+    store.record_feedback(FeedbackEvent("b", "org/repo", 3, "other", FeedbackKind.FALSE_POSITIVE))
+    assert [item.event_id for item in store.feedback_for_head("org/repo", 3, "head")] == ["a"]
