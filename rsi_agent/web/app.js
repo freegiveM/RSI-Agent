@@ -281,7 +281,7 @@
             <span class="stripe" aria-hidden="true"></span>
             <span class="title"><strong>${esc(job.repository)} <span class="muted">#${esc(job.pr_number)}</span></strong>
               <span class="mono">${esc(shortSha(job.head_sha))}</span><span> · ${esc(job.policy_version)}</span></span>
-            <span class="cell">${tag(o.tag, o.tone)}<small>${esc(STATUS[job.status] || job.status)}${job.failure?.class ? ' · ' + esc(job.failure.class) : ''}</small></span>
+            <span class="cell">${tag(o.tag, o.tone)}<small>${esc(STATUS[job.status] || job.status)}${job.failure?.class && job.status !== 'COMPLETED' ? ' · ' + esc(job.failure.class) : ''}</small></span>
             <span class="cell hide-s"><span class="num">${esc(job.finding_count || 0)}</span> Finding<small>${verified == null ? '' : `${verified} 条已验证`}</small></span>
             <span class="cell hide-s" title="${esc(fmtTime(job.created_at, true))}">${esc(fromNow(job.created_at))}<small>${esc(fmtTime(job.created_at))}</small></span>
             <span class="arrow">${ICON.arrow}</span>
